@@ -1,0 +1,5 @@
+This is a test document for the AI Document Assistant.
+
+It contains some sample text that can be used for testing the PDF upload and question answering functionality.
+
+The assistant should be able to read this content and answer questions about it.

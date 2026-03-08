@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --primary: 45 93% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 100% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --accent: 45 93% 47%;
+    --accent-foreground: 0 0% 100%;
+    --muted: 45 100% 96%;
+    --muted-foreground: 215 16% 47%;
+    --border: 45 84% 88%;
+    --card: 0 0% 98%;
+  }
+
+  .dark {
+    --background: 222 47% 4%;
+    --foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 222 47% 11%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --border: 217 33% 17%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-amber-600 via-orange-500 to-yellow-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400;
+  }
+  
+  .glass {
+    @apply bg-white/90 backdrop-blur-xl border border-amber-200 shadow-sm dark:bg-white/5 dark:border-white/10;
+  }
+  
+  .glow-border {
+    @apply border border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.3)] dark:border-blue-500/50 dark:shadow-[0_0_15px_rgba(59,130,246,0.5)];
+  }
+  
+  .glow-text {
+    text-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+  }
+}
+
+@keyframes gradient-rotate {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-gradient-rotate {
+  background-size: 200% 200%;
+  animation: gradient-rotate 3s ease infinite;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  overflow-x: hidden;
+}
