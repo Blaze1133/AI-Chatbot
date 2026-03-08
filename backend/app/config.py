@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from pathlib import Path
+import os
 
 class Settings(BaseSettings):
     # Groq Configuration
@@ -16,6 +17,9 @@ class Settings(BaseSettings):
     # Model Configuration
     MODEL_NAME: str = "llama-3.3-70b-versatile"
     TEMPERATURE: float = 0.7
+    
+    # Environment
+    ENVIRONMENT: str = "development"
     
     class Config:
         env_file = ".env"
