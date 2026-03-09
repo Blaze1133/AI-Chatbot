@@ -1,7 +1,6 @@
 {
   "version": 2,
   "name": "ai-chatbot",
-  "root": ".",
   "builds": [
     {
       "src": "backend/app/api/index.py",
