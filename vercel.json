@@ -5,7 +5,11 @@
   "builds": [
     {
       "src": "backend/app/api/index.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "runtime": "python3.9",
+        "maxDuration": 30
+      }
     },
     {
       "src": "frontend/package.json",
@@ -27,12 +31,6 @@
   ],
   "env": {
     "PYTHONPATH": "/vercel/path0/backend"
-  },
-  "functions": {
-    "backend/app/api/index.py": {
-      "runtime": "python3.9",
-      "maxDuration": 30
-    }
   },
   "installCommand": "cd backend && pip install -r requirements-vercel.txt"
 }
