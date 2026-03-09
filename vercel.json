@@ -31,5 +31,5 @@
   "env": {
     "PYTHONPATH": "/vercel/path0/backend"
   },
-  "installCommand": "cd backend && pip install -r requirements-vercel.txt"
+  "installCommand": "pip install -r backend/requirements-vercel.txt"
 }
