@@ -14,7 +14,7 @@ A FastAPI-based backend service that enables intelligent question-answering over
 ## Prerequisites
 
 - Python 3.8+
-- Groq API key ([Get one here](https://console.groq.com))
+- Groq API key ([Get one her e](https://console.groq.com))
 
 ## Installation
 
