@@ -1,0 +1,10 @@
+{
+  "name": "ai-chatbot-backend",
+  "version": "1.0.0",
+  "description": "AI Document Assistant Backend API",
+  "main": "api/index.py",
+  "scripts": {
+    "start": "python api/index.py"
+  },
+  "dependencies": {}
+}
