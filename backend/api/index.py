@@ -1,22 +1,12 @@
-import sys
-import os
-
-# Add backend to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 
-# Import routes
-from app.routes import documents, chat, session
-
-# Create FastAPI app
-app = FastAPI(title="AI Document Assistant API",
+app = FastAPI(
+    title="AI Document Assistant API",
     description="AI-powered document question answering system",
-    version="1.0.0")
+    version="1.0.0"
+)
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,20 +15,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(documents.router)
-app.include_router(chat.router)
-app.include_router(session.router)
-
-# Root endpoint
 @app.get("/")
 async def root():
-    return {"message": "AI Document Assistant API is running", "session_based": True}
+    return {
+        "message": "AI Document Assistant API is running",
+        "status": "healthy",
+        "version": "1.0.0"
+    }
 
-@app.get("/health")
+@app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "session_storage": True}
+    return {"status": "healthy"}
 
-# For Vercel serverless
-def handler(request):
-    return app(request)
+@app.get("/api/test")
+async def test():
+    return {"message": "Backend API is working!", "deployed": "vercel"}
