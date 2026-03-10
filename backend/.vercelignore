@@ -6,6 +6,7 @@ __pycache__
 env/
 venv/
 .venv/
+myvenv/
 pip-log.txt
 pip-delete-this-directory.txt
 .tox/
@@ -20,8 +21,8 @@ coverage.xml
 .mypy_cache
 .pytest_cache
 .hypothesis
-uploads/*
-vector_db/*
+uploads/
+vector_db/
 *.db
 *.sqlite
 .env
@@ -38,3 +39,4 @@ node_modules/
 README.md
 DETAILED_FLOW.md
 runtime.txt
+app/
