@@ -6,6 +6,9 @@ import uuid
 import fitz  # PyMuPDF
 from typing import Optional, List
 from groq import Groq
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 app = FastAPI(
     title="AI Document Assistant API",
@@ -26,6 +29,8 @@ documents_store = {}
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
+CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 
 class ChatRequest(BaseModel):
     question: str
@@ -50,19 +55,60 @@ def extract_text_from_pdf(file_bytes: bytes) -> List[dict]:
     return pages
 
 
-def find_relevant_chunks(pages: List[dict], question: str, top_k: int = 3) -> List[dict]:
-    """Simple keyword-based relevance search across pages."""
-    question_words = set(question.lower().split())
-    scored = []
-    for p in pages:
-        content_lower = p["content"].lower()
-        score = sum(1 for w in question_words if w in content_lower)
-        scored.append((score, p))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    # Return top_k pages, but always return at least the first page if nothing matches
-    results = [item[1] for item in scored[:top_k] if item[0] > 0]
-    if not results and pages:
-        results = [pages[0]]
+def chunk_text(pages: List[dict], chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[dict]:
+    """Split page text into overlapping chunks for better semantic retrieval."""
+    chunks = []
+    for page_info in pages:
+        text = page_info["content"]
+        page_num = page_info["page"]
+        words = text.split()
+        if len(words) <= chunk_size:
+            chunks.append({"page": page_num, "content": text})
+        else:
+            start = 0
+            while start < len(words):
+                end = start + chunk_size
+                chunk_text = " ".join(words[start:end])
+                chunks.append({"page": page_num, "content": chunk_text})
+                start += chunk_size - overlap
+    return chunks
+
+
+def semantic_search(chunks: List[dict], question: str, top_k: int = 3) -> List[dict]:
+    """TF-IDF based semantic search - finds chunks most similar to the question."""
+    if not chunks:
+        return []
+
+    corpus = [c["content"] for c in chunks]
+    corpus.append(question)  # Add question as last element
+
+    vectorizer = TfidfVectorizer(
+        stop_words="english",
+        ngram_range=(1, 2),  # Unigrams and bigrams for better semantic matching
+        max_features=5000,
+    )
+    tfidf_matrix = vectorizer.fit_transform(corpus)
+
+    # Compute cosine similarity between question (last) and all chunks
+    question_vec = tfidf_matrix[-1]
+    chunk_vecs = tfidf_matrix[:-1]
+    similarities = cosine_similarity(question_vec, chunk_vecs).flatten()
+
+    # Get top_k indices sorted by similarity
+    top_indices = np.argsort(similarities)[::-1][:top_k]
+
+    results = []
+    for idx in top_indices:
+        if similarities[idx] > 0.0:  # Only include chunks with some relevance
+            results.append({
+                **chunks[idx],
+                "score": float(similarities[idx]),
+            })
+
+    # Fallback: if no semantic match, return first chunk
+    if not results and chunks:
+        results = [{**chunks[0], "score": 0.0}]
+
     return results
 
 
@@ -133,10 +179,13 @@ async def upload_document(file: UploadFile = File(...)):
         if not pages:
             raise HTTPException(status_code=400, detail="Could not extract any text from this PDF")
 
+        chunks = chunk_text(pages)
+
         documents_store[document_id] = {
             "filename": file.filename,
             "document_id": document_id,
             "pages": pages,
+            "chunks": chunks,
             "full_text": "\n\n".join(p["content"] for p in pages),
         }
     except HTTPException:
@@ -167,10 +216,10 @@ async def ask_question(request: ChatRequest):
 
     doc_info = documents_store.get(request.document_id, {})
     filename = doc_info.get("filename", "unknown")
-    pages = doc_info.get("pages", [])
+    chunks = doc_info.get("chunks", [])
 
-    # Find relevant chunks
-    relevant = find_relevant_chunks(pages, request.question, top_k=3)
+    # Semantic search using TF-IDF cosine similarity
+    relevant = semantic_search(chunks, request.question, top_k=3)
 
     # Build context from relevant pages (limit to ~6000 chars to stay within token limits)
     context_parts = []
