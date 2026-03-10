@@ -170,6 +170,36 @@ async def health_check():
 async def test():
     return {"message": "Backend API is working!", "deployed": "vercel"}
 
+@app.post("/api/cleanup")
+async def cleanup_old_documents():
+    """Delete documents older than 30 minutes. Called by Vercel Cron."""
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase not initialized")
+    
+    try:
+        # Delete documents older than 30 minutes
+        result = supabase_client.rpc("cleanup_old_documents").execute()
+        
+        return {
+            "message": "Cleanup completed successfully",
+            "timestamp": result.data if result.data else "completed"
+        }
+    except Exception as e:
+        # If function doesn't exist, try direct delete (fallback)
+        try:
+            from datetime import datetime, timedelta
+            cutoff_time = (datetime.utcnow() - timedelta(minutes=30)).isoformat()
+            
+            # Note: This requires created_at column in table
+            result = supabase_client.table("documents").delete().lt("created_at", cutoff_time).execute()
+            
+            return {
+                "message": "Cleanup completed (direct delete)",
+                "deleted_count": len(result.data) if result.data else 0
+            }
+        except Exception as fallback_error:
+            raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(fallback_error)}")
+
 @app.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     """Upload a PDF document and extract its text."""
