@@ -6,11 +6,8 @@ import uuid
 import fitz  # PyMuPDF
 from typing import Optional, List
 from groq import Groq
-from langchain_cohere import CohereEmbeddings
-from langchain_community.vectorstores import SupabaseVectorStore
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-from supabase.client import Client, create_client
+import cohere
+from supabase import create_client, Client
 
 app = FastAPI(
     title="AI Document Assistant API",
@@ -35,27 +32,15 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "200"))
 
-# Initialize Supabase client and embeddings
+# Initialize clients
 supabase_client: Optional[Client] = None
-vector_store: Optional[SupabaseVectorStore] = None
-embeddings: Optional[CohereEmbeddings] = None
+cohere_client: Optional[cohere.Client] = None
 
 if SUPABASE_URL and SUPABASE_KEY:
     supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     
 if COHERE_API_KEY:
-    embeddings = CohereEmbeddings(
-        cohere_api_key=COHERE_API_KEY,
-        model="embed-english-light-v3.0"  # Free tier model
-    )
-    
-if supabase_client and embeddings:
-    vector_store = SupabaseVectorStore(
-        client=supabase_client,
-        embedding=embeddings,
-        table_name="documents",
-        query_name="match_documents"
-    )
+    cohere_client = cohere.Client(COHERE_API_KEY)
 
 class ChatRequest(BaseModel):
     question: str
@@ -80,33 +65,52 @@ def extract_text_from_pdf(file_bytes: bytes) -> List[dict]:
     return pages
 
 
-def chunk_documents(pages: List[dict], document_id: str, filename: str) -> List[Document]:
-    """Split pages into LangChain Document chunks with metadata."""
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        length_function=len,
-    )
-    
-    documents = []
+def chunk_text_simple(pages: List[dict], document_id: str, filename: str) -> List[dict]:
+    """Split pages into chunks with metadata."""
+    chunks = []
     for page_info in pages:
         page_num = page_info["page"]
         text = page_info["content"]
+        words = text.split()
         
-        chunks = text_splitter.split_text(text)
-        for i, chunk in enumerate(chunks):
-            doc = Document(
-                page_content=chunk,
-                metadata={
+        if len(words) <= CHUNK_SIZE:
+            chunks.append({
+                "content": text,
+                "document_id": document_id,
+                "filename": filename,
+                "page": page_num,
+                "chunk_index": 0
+            })
+        else:
+            start = 0
+            chunk_idx = 0
+            while start < len(words):
+                end = start + CHUNK_SIZE
+                chunk_text = " ".join(words[start:end])
+                chunks.append({
+                    "content": chunk_text,
                     "document_id": document_id,
                     "filename": filename,
                     "page": page_num,
-                    "chunk_index": i,
-                }
-            )
-            documents.append(doc)
+                    "chunk_index": chunk_idx
+                })
+                start += CHUNK_SIZE - CHUNK_OVERLAP
+                chunk_idx += 1
     
-    return documents
+    return chunks
+
+
+def get_embeddings(texts: List[str]) -> List[List[float]]:
+    """Get embeddings from Cohere."""
+    if not cohere_client:
+        raise HTTPException(status_code=503, detail="Cohere client not initialized")
+    
+    response = cohere_client.embed(
+        texts=texts,
+        model="embed-english-light-v3.0",
+        input_type="search_document"
+    )
+    return response.embeddings
 
 
 def ask_groq(question: str, context: str, filename: str) -> str:
@@ -157,9 +161,9 @@ async def root():
 async def health_check():
     return {
         "status": "healthy",
-        "vector_store_initialized": vector_store is not None,
-        "embeddings_initialized": embeddings is not None,
-        "supabase_connected": supabase_client is not None
+        "supabase_connected": supabase_client is not None,
+        "cohere_initialized": cohere_client is not None,
+        "groq_initialized": bool(GROQ_API_KEY)
     }
 
 @app.get("/api/test")
@@ -172,8 +176,8 @@ async def upload_document(file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     
-    if not vector_store:
-        raise HTTPException(status_code=503, detail="Vector store not initialized. Please configure SUPABASE_URL, SUPABASE_SERVICE_KEY, and COHERE_API_KEY.")
+    if not supabase_client or not cohere_client:
+        raise HTTPException(status_code=503, detail="Services not initialized. Please configure SUPABASE_URL, SUPABASE_SERVICE_KEY, and COHERE_API_KEY.")
 
     document_id = str(uuid.uuid4())
 
@@ -184,18 +188,32 @@ async def upload_document(file: UploadFile = File(...)):
         if not pages:
             raise HTTPException(status_code=400, detail="Could not extract any text from this PDF")
 
-        # Create LangChain documents with metadata
-        documents = chunk_documents(pages, document_id, file.filename)
+        # Create chunks
+        chunks = chunk_text_simple(pages, document_id, file.filename)
         
-        # Add to Supabase vector store
-        vector_store.add_documents(documents)
+        # Get embeddings for all chunks
+        chunk_texts = [c["content"] for c in chunks]
+        embeddings = get_embeddings(chunk_texts)
+        
+        # Insert into Supabase
+        for i, chunk in enumerate(chunks):
+            supabase_client.table("documents").insert({
+                "content": chunk["content"],
+                "metadata": {
+                    "document_id": chunk["document_id"],
+                    "filename": chunk["filename"],
+                    "page": chunk["page"],
+                    "chunk_index": chunk["chunk_index"]
+                },
+                "embedding": embeddings[i]
+            }).execute()
         
         return {
-            "message": f"Document uploaded successfully. {len(pages)} pages, {len(documents)} chunks processed.",
+            "message": f"Document uploaded successfully. {len(pages)} pages, {len(chunks)} chunks processed.",
             "document_id": document_id,
             "filename": file.filename,
             "pages": len(pages),
-            "chunks": len(documents)
+            "chunks": len(chunks)
         }
     except HTTPException:
         raise
@@ -205,8 +223,8 @@ async def upload_document(file: UploadFile = File(...)):
 @app.delete("/api/documents/{document_id}")
 async def delete_document(document_id: str):
     """Delete a document from vector store."""
-    if not vector_store or not supabase_client:
-        raise HTTPException(status_code=503, detail="Vector store not initialized")
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Supabase not initialized")
     
     try:
         # Delete from Supabase using metadata filter
@@ -218,27 +236,30 @@ async def delete_document(document_id: str):
 @app.post("/api/chat/ask")
 async def ask_question(request: ChatRequest):
     """Ask a question about an uploaded document using Groq LLM with vector search."""
-    if not vector_store:
-        raise HTTPException(status_code=503, detail="Vector store not initialized. Please configure SUPABASE_URL, SUPABASE_SERVICE_KEY, and COHERE_API_KEY.")
+    if not supabase_client or not cohere_client:
+        raise HTTPException(status_code=503, detail="Services not initialized. Please configure SUPABASE_URL, SUPABASE_SERVICE_KEY, and COHERE_API_KEY.")
 
     try:
-        # Semantic search using Supabase vector similarity
-        if request.document_id:
-            # Search only within specific document
-            filter_dict = {"document_id": request.document_id}
-            relevant_docs = vector_store.similarity_search(
-                request.question,
-                k=4,
-                filter=filter_dict
-            )
-        else:
-            # Search across all documents
-            relevant_docs = vector_store.similarity_search(
-                request.question,
-                k=4
-            )
+        # Get question embedding
+        question_response = cohere_client.embed(
+            texts=[request.question],
+            model="embed-english-light-v3.0",
+            input_type="search_query"
+        )
+        question_embedding = question_response.embeddings[0]
         
-        if not relevant_docs:
+        # Call Supabase RPC function for vector similarity search
+        rpc_params = {
+            "query_embedding": question_embedding,
+            "match_count": 4
+        }
+        
+        if request.document_id:
+            rpc_params["filter"] = {"document_id": request.document_id}
+        
+        result = supabase_client.rpc("match_documents", rpc_params).execute()
+        
+        if not result.data:
             return {
                 "answer": "No relevant information found. Please upload a document first.",
                 "source_documents": []
@@ -247,11 +268,11 @@ async def ask_question(request: ChatRequest):
         # Build context from relevant chunks
         context_parts = []
         char_count = 0
-        filename = relevant_docs[0].metadata.get("filename", "unknown")
+        filename = result.data[0]["metadata"].get("filename", "unknown")
         
-        for doc in relevant_docs:
-            content = doc.page_content
-            page = doc.metadata.get("page", 0)
+        for row in result.data:
+            content = row["content"]
+            page = row["metadata"].get("page", 0)
             
             if char_count + len(content) > 6000:
                 remaining = 6000 - char_count
@@ -269,11 +290,11 @@ async def ask_question(request: ChatRequest):
         # Format source documents
         source_documents = [
             {
-                "content": doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""),
-                "page": doc.metadata.get("page", 0),
-                "filename": doc.metadata.get("filename", "unknown"),
+                "content": row["content"][:300] + ("..." if len(row["content"]) > 300 else ""),
+                "page": row["metadata"].get("page", 0),
+                "filename": row["metadata"].get("filename", "unknown"),
             }
-            for doc in relevant_docs
+            for row in result.data
         ]
 
         return {
