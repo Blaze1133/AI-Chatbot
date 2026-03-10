@@ -6,5 +6,9 @@ python-dotenv
 requests
 groq
 PyMuPDF
-scikit-learn
-numpy
+langchain
+langchain-community
+langchain-cohere
+supabase
+pgvector
+psycopg2-binary
